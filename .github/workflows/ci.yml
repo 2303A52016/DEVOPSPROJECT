@@ -11,8 +11,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout code
+    - name: Checkout Code
       uses: actions/checkout@v4
+
+    - name: Show repository structure
+      run: |
+        find . -maxdepth 2 | sort
 
     - name: Setup Node.js
       uses: actions/setup-node@v4
@@ -25,17 +29,30 @@ jobs:
         cd backend
         npm ci
 
+    - name: Run backend tests
+      run: |
+        cd backend
+        if [ -f package.json ] && grep -q '"test"' package.json; then
+          npm test
+        else
+          echo "No tests defined"
+        fi
+
     - name: Install frontend dependencies
       run: |
         cd frontend
         npm ci
 
-    - name: Build frontend
+    - name: Build React App
       run: |
         cd frontend
         npm run build
 
-    - name: Run backend tests (if any)
-      run: |
-        cd backend
-        npm test || echo "No tests defined"
+    - name: Post Setup Node
+      run: echo "Post Setup Node"
+
+    - name: Post Checkout Code
+      run: echo "Post Checkout Code"
+
+    - name: Complete job
+      run: echo "Complete job"
