@@ -9,6 +9,26 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      PG_USER: postgres
+      PG_PASSWORD: postgres
+      PG_HOST: localhost
+      PG_PORT: 5432
+      PG_DATABASE: lifeweb
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: lifeweb
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d lifeweb"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
 
     steps:
     - name: Checkout Code
@@ -32,6 +52,11 @@ jobs:
       run: |
         cd backend
         npm ci
+
+    - name: Initialize backend database schema
+      run: |
+        cd backend
+        npm run db:init
 
     - name: Run backend tests
       run: |

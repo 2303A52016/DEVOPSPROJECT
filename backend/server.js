@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const { initializeDatabase } = require('./config/initDb');
 
 const authRoutes = require('./routes/authRoutes');
 const plannerRoutes = require('./routes/plannerRoutes');
@@ -23,6 +24,17 @@ app.get('/', (req, res) => {
 });
 
 const PORT = 5000;
-app.listen(PORT, () => {
-  console.log(`Life Planner API running on port ${PORT}`);
-});
+
+async function startServer() {
+  try {
+    await initializeDatabase();
+    app.listen(PORT, () => {
+      console.log(`Life Planner API running on port ${PORT}`);
+    });
+  } catch (error) {
+    console.error('Failed to initialize database:', error);
+    process.exit(1);
+  }
+}
+
+startServer();

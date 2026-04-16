@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 
-const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:5000";
+const configuredApiBase = (import.meta.env.VITE_API_BASE || "").replace(/\/$/, "");
+const isLocalHost =
+  typeof window !== "undefined" &&
+  (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
+const API_BASE = configuredApiBase || (isLocalHost ? "http://localhost:5000" : "");
 
 const todayIso = new Date().toISOString().slice(0, 10);
 
@@ -97,6 +101,12 @@ function App() {
       setLoading(true);
       setError("");
 
+      if (!API_BASE) {
+        setLoading(false);
+        setError("Backend API is not configured. Set VITE_API_BASE to your deployed backend URL.");
+        return;
+      }
+
       try {
         const [plannerRes, tasksRes, diaryRes] = await Promise.all([
           fetch(`${API_BASE}/api/planner/${userId}`),
@@ -121,7 +131,11 @@ function App() {
         setDiaryEntries(diaryJson.diary || []);
       } catch (err) {
         if (active) {
-          setError(err.message || "Something went wrong while loading data.");
+          if (err instanceof TypeError) {
+            setError("Cannot reach backend API. Check VITE_API_BASE and backend CORS/network settings.");
+          } else {
+            setError(err.message || "Something went wrong while loading data.");
+          }
         }
       } finally {
         if (active) {
