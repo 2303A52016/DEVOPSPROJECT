@@ -1,197 +1,499 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-const metrics = [
-  { label: "Uptime", value: "99.98%", note: "last 30 days" },
-  { label: "Deploys", value: "184", note: "this month" },
-  { label: "Active Nodes", value: "16", note: "healthy" },
-  { label: "Avg MTTR", value: "12m", note: "incident response" },
-];
+const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:5000";
 
-const highlights = [
-  {
-    title: "Task Planner",
-    text: "Plan work with priorities, due dates, and status tracking for individuals and teams.",
-  },
-  {
-    title: "Daily Diary",
-    text: "Capture daily progress, blockers, and lessons in a clean journaling flow.",
-  },
-  {
-    title: "Vitality Monitor",
-    text: "Track well-being metrics to keep your team productive and sustainable.",
-  },
-  {
-    title: "Secure Auth",
-    text: "JWT-based session handling with protected routes and backend API integration.",
-  },
-];
+const todayIso = new Date().toISOString().slice(0, 10);
 
-const environmentStatus = [
-  { env: "Production", status: "Healthy", lastDeploy: "2h ago" },
-  { env: "Staging", status: "Healthy", lastDeploy: "18m ago" },
-  { env: "Development", status: "Active", lastDeploy: "5m ago" },
-];
+function toMinutes(value) {
+  if (!value || !value.includes(":")) {
+    return 0;
+  }
+  const [h, m] = value.split(":").map(Number);
+  return h * 60 + m;
+}
 
-const navItems = ["Overview", "Features", "Status", "Roadmap", "Contact"];
+function minutesToLabel(totalMinutes) {
+  const hour24 = Math.floor(totalMinutes / 60);
+  const minute = totalMinutes % 60;
+  const period = hour24 >= 12 ? "PM" : "AM";
+  const hour12 = hour24 % 12 || 12;
+  return `${hour12}:${String(minute).padStart(2, "0")} ${period}`;
+}
+
+function formatNiceDate(value) {
+  const date = new Date(`${value}T00:00:00`);
+  return new Intl.DateTimeFormat("en-US", {
+    weekday: "long",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(date);
+}
+
+function scoreDay(tasks, blocks) {
+  const completed = tasks.filter((item) => item.completed).length;
+  const taskScore = tasks.length ? (completed / tasks.length) * 60 : 0;
+  const hours = blocks.reduce((sum, block) => {
+    const minutes = Math.max(0, toMinutes(block.end_time) - toMinutes(block.start_time));
+    return sum + minutes / 60;
+  }, 0);
+  const scheduleScore = Math.min(40, hours * 5);
+  return Math.round(taskScore + scheduleScore);
+}
 
 function App() {
-  const [email, setEmail] = useState("");
-  const [role, setRole] = useState("Developer");
-  const [messageSent, setMessageSent] = useState(false);
+  const [userId, setUserId] = useState("1");
+  const [selectedDate, setSelectedDate] = useState(todayIso);
+  const [plannerItems, setPlannerItems] = useState([]);
+  const [tasks, setTasks] = useState([]);
+  const [diaryEntries, setDiaryEntries] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
 
-  const year = useMemo(() => new Date().getFullYear(), []);
+  const [newBlock, setNewBlock] = useState({
+    activity: "",
+    start_time: "09:00",
+    end_time: "10:00",
+  });
+  const [newTask, setNewTask] = useState("");
+  const [mood, setMood] = useState("focused");
+  const [entryText, setEntryText] = useState("");
 
-  function handleSubmit(event) {
+  const filteredPlanner = useMemo(
+    () =>
+      plannerItems
+        .filter((item) => item.date === selectedDate)
+        .sort((a, b) => toMinutes(a.start_time) - toMinutes(b.start_time)),
+    [plannerItems, selectedDate]
+  );
+
+  const todayTasks = useMemo(() => tasks.slice().reverse(), [tasks]);
+
+  const currentEntry = useMemo(
+    () => diaryEntries.find((item) => item.date === selectedDate),
+    [diaryEntries, selectedDate]
+  );
+
+  const totalFocusScore = useMemo(
+    () => scoreDay(todayTasks, filteredPlanner),
+    [todayTasks, filteredPlanner]
+  );
+
+  useEffect(() => {
+    if (currentEntry) {
+      setMood(currentEntry.mood);
+      setEntryText(currentEntry.entry);
+    } else {
+      setMood("focused");
+      setEntryText("");
+    }
+  }, [currentEntry]);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadPlannerData() {
+      setLoading(true);
+      setError("");
+
+      try {
+        const [plannerRes, tasksRes, diaryRes] = await Promise.all([
+          fetch(`${API_BASE}/api/planner/${userId}`),
+          fetch(`${API_BASE}/api/tasks/${userId}`),
+          fetch(`${API_BASE}/api/diary/${userId}`),
+        ]);
+
+        if (!plannerRes.ok || !tasksRes.ok || !diaryRes.ok) {
+          throw new Error("Unable to load planner data.");
+        }
+
+        const plannerJson = await plannerRes.json();
+        const tasksJson = await tasksRes.json();
+        const diaryJson = await diaryRes.json();
+
+        if (!active) {
+          return;
+        }
+
+        setPlannerItems(plannerJson.planner || []);
+        setTasks(tasksJson.tasks || []);
+        setDiaryEntries(diaryJson.diary || []);
+      } catch (err) {
+        if (active) {
+          setError(err.message || "Something went wrong while loading data.");
+        }
+      } finally {
+        if (active) {
+          setLoading(false);
+        }
+      }
+    }
+
+    if (userId.trim()) {
+      loadPlannerData();
+    }
+
+    return () => {
+      active = false;
+    };
+  }, [userId]);
+
+  async function createBlock(event) {
     event.preventDefault();
-    if (!email.trim()) {
+    if (!newBlock.activity.trim()) {
       return;
     }
-    setMessageSent(true);
-    setEmail("");
+    if (toMinutes(newBlock.end_time) <= toMinutes(newBlock.start_time)) {
+      setError("End time must be later than start time.");
+      return;
+    }
+
+    setSaving(true);
+    setError("");
+
+    try {
+      const res = await fetch(`${API_BASE}/api/planner`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: Number(userId),
+          activity: newBlock.activity.trim(),
+          start_time: newBlock.start_time,
+          end_time: newBlock.end_time,
+          date: selectedDate,
+        }),
+      });
+
+      if (!res.ok) {
+        throw new Error("Could not save schedule block.");
+      }
+
+      const json = await res.json();
+      setPlannerItems((prev) => [json.planner, ...prev]);
+      setNewBlock({ activity: "", start_time: "09:00", end_time: "10:00" });
+    } catch (err) {
+      setError(err.message || "Could not create planner block.");
+    } finally {
+      setSaving(false);
+    }
   }
 
+  async function removeBlock(id) {
+    setSaving(true);
+    setError("");
+    try {
+      const res = await fetch(`${API_BASE}/api/planner/${id}`, { method: "DELETE" });
+      if (!res.ok) {
+        throw new Error("Could not delete planner block.");
+      }
+      setPlannerItems((prev) => prev.filter((item) => item.id !== id));
+    } catch (err) {
+      setError(err.message || "Failed to remove planner block.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function createTask(event) {
+    event.preventDefault();
+    if (!newTask.trim()) {
+      return;
+    }
+
+    setSaving(true);
+    setError("");
+
+    try {
+      const res = await fetch(`${API_BASE}/api/tasks`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: Number(userId),
+          task: newTask.trim(),
+          completed: false,
+        }),
+      });
+
+      if (!res.ok) {
+        throw new Error("Could not create task.");
+      }
+
+      const json = await res.json();
+      setTasks((prev) => [json.task, ...prev]);
+      setNewTask("");
+    } catch (err) {
+      setError(err.message || "Failed to create task.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function toggleTask(task) {
+    setError("");
+    const oldState = tasks;
+    const nextState = tasks.map((item) =>
+      item.id === task.id ? { ...item, completed: !item.completed } : item
+    );
+    setTasks(nextState);
+
+    try {
+      const res = await fetch(`${API_BASE}/api/tasks/${task.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ completed: !task.completed }),
+      });
+
+      if (!res.ok) {
+        throw new Error("Could not update task.");
+      }
+    } catch (err) {
+      setTasks(oldState);
+      setError(err.message || "Failed to update task state.");
+    }
+  }
+
+  async function removeTask(id) {
+    setSaving(true);
+    setError("");
+    try {
+      const res = await fetch(`${API_BASE}/api/tasks/${id}`, { method: "DELETE" });
+      if (!res.ok) {
+        throw new Error("Could not delete task.");
+      }
+      setTasks((prev) => prev.filter((item) => item.id !== id));
+    } catch (err) {
+      setError(err.message || "Failed to delete task.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveDiary(event) {
+    event.preventDefault();
+    if (!entryText.trim()) {
+      return;
+    }
+
+    setSaving(true);
+    setError("");
+
+    try {
+      const res = await fetch(`${API_BASE}/api/diary`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: Number(userId),
+          date: selectedDate,
+          mood,
+          entry: entryText.trim(),
+        }),
+      });
+
+      if (!res.ok) {
+        throw new Error("Could not save reflection.");
+      }
+
+      const json = await res.json();
+      setDiaryEntries((prev) => [json.diary, ...prev.filter((item) => item.date !== selectedDate)]);
+    } catch (err) {
+      setError(err.message || "Failed to save reflection.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const completedCount = todayTasks.filter((item) => item.completed).length;
+
   return (
-    <div className="page">
-      <header className="site-header">
-        <div className="brand-wrap">
-          <span className="brand-dot" aria-hidden="true" />
-          <p className="brand">DevOps Project</p>
+    <div className="planner-page">
+      <header className="topbar">
+        <div className="title-wrap">
+          <p className="label">Life Planner</p>
+          <h1>Daily Planner Board</h1>
+          <p className="subtitle">Turn your day into blocks, priorities, and a clear finish line.</p>
         </div>
-        <nav className="nav" aria-label="Main navigation">
-          {navItems.map((item) => (
-            <a key={item} href="#" className="nav-link">
-              {item}
-            </a>
-          ))}
-        </nav>
+        <div className="controls">
+          <label>
+            User
+            <input
+              value={userId}
+              onChange={(event) => setUserId(event.target.value.replace(/\D/g, ""))}
+              className="compact-input"
+              aria-label="User id"
+            />
+          </label>
+          <label>
+            Day
+            <input
+              type="date"
+              value={selectedDate}
+              onChange={(event) => setSelectedDate(event.target.value)}
+              className="compact-input"
+            />
+          </label>
+        </div>
       </header>
 
-      <main>
-        <section className="hero panel">
-          <p className="eyebrow">Ship faster. Stay reliable.</p>
-          <h1>Full-stack productivity suite for modern DevOps teams.</h1>
-          <p className="hero-text">
-            Your GitHub Pages frontend is now configured for subpath deployment and
-            upgraded into a complete, responsive product website.
-          </p>
-          <div className="hero-cta">
-            <button type="button" className="btn btn-primary">
-              Explore Dashboard
-            </button>
-            <button type="button" className="btn btn-secondary">
-              View API Modules
-            </button>
+      <section className="summary-grid" aria-live="polite">
+        <article className="summary-card glow">
+          <p>Focus Score</p>
+          <h2>{totalFocusScore}</h2>
+          <small>Based on completed priorities and planned hours</small>
+        </article>
+        <article className="summary-card">
+          <p>Tasks Done</p>
+          <h2>{completedCount}/{todayTasks.length || 0}</h2>
+          <small>Keep momentum through the day</small>
+        </article>
+        <article className="summary-card">
+          <p>Schedule Blocks</p>
+          <h2>{filteredPlanner.length}</h2>
+          <small>{formatNiceDate(selectedDate)}</small>
+        </article>
+      </section>
+
+      {error ? <p className="feedback error">{error}</p> : null}
+      {loading ? <p className="feedback">Loading planner data...</p> : null}
+
+      <main className="planner-layout">
+        <section className="card timetable-card">
+          <div className="section-head">
+            <h3>Day Timeline</h3>
+            <span>{formatNiceDate(selectedDate)}</span>
           </div>
-        </section>
 
-        <section className="metrics-grid" aria-label="Key project metrics">
-          {metrics.map((metric) => (
-            <article key={metric.label} className="metric-card panel">
-              <p className="metric-label">{metric.label}</p>
-              <p className="metric-value">{metric.value}</p>
-              <p className="metric-note">{metric.note}</p>
-            </article>
-          ))}
-        </section>
-
-        <section className="split-layout">
-          <article className="panel features">
-            <h2>Core Features</h2>
-            <div className="feature-list">
-              {highlights.map((item) => (
-                <div key={item.title} className="feature-item">
-                  <h3>{item.title}</h3>
-                  <p>{item.text}</p>
-                </div>
-              ))}
-            </div>
-          </article>
-
-          <article className="panel status-board">
-            <h2>Environment Status</h2>
-            <ul className="status-list">
-              {environmentStatus.map((entry) => (
-                <li key={entry.env} className="status-row">
-                  <div>
-                    <p className="status-env">{entry.env}</p>
-                    <p className="status-deploy">Last deploy: {entry.lastDeploy}</p>
-                  </div>
-                  <span className="status-chip">{entry.status}</span>
-                </li>
-              ))}
-            </ul>
-          </article>
-        </section>
-
-        <section className="panel roadmap">
-          <h2>Roadmap</h2>
-          <div className="roadmap-track" aria-label="Roadmap timeline">
-            <div className="roadmap-step">
-              <p className="step-tag">Phase 1</p>
-              <h3>Foundation</h3>
-              <p>Authentication, task CRUD, diary endpoints, and planner APIs.</p>
-            </div>
-            <div className="roadmap-step">
-              <p className="step-tag">Phase 2</p>
-              <h3>Experience</h3>
-              <p>UX enhancements, analytics cards, and improved accessibility.</p>
-            </div>
-            <div className="roadmap-step">
-              <p className="step-tag">Phase 3</p>
-              <h3>Scale</h3>
-              <p>Observability, CI validation checks, and deployment automation.</p>
-            </div>
-          </div>
-        </section>
-
-        <section className="panel contact">
-          <h2>Stay in the loop</h2>
-          <p>Get release notes and feature updates for your role.</p>
-          <form className="contact-form" onSubmit={handleSubmit}>
-            <label htmlFor="email" className="sr-only">
-              Email address
-            </label>
+          <form className="inline-form" onSubmit={createBlock}>
             <input
-              id="email"
-              type="email"
-              placeholder="you@example.com"
-              value={email}
-              onChange={(event) => {
-                setEmail(event.target.value);
-                if (messageSent) {
-                  setMessageSent(false);
-                }
-              }}
-              required
+              type="text"
+              placeholder="Activity"
+              value={newBlock.activity}
+              onChange={(event) =>
+                setNewBlock((prev) => ({ ...prev, activity: event.target.value }))
+              }
             />
-
-            <label htmlFor="role" className="sr-only">
-              Role
-            </label>
-            <select
-              id="role"
-              value={role}
-              onChange={(event) => setRole(event.target.value)}
-            >
-              <option>Developer</option>
-              <option>DevOps Engineer</option>
-              <option>Team Lead</option>
-              <option>Project Manager</option>
-            </select>
-
-            <button type="submit" className="btn btn-primary">
-              Notify Me
+            <input
+              type="time"
+              value={newBlock.start_time}
+              onChange={(event) =>
+                setNewBlock((prev) => ({ ...prev, start_time: event.target.value }))
+              }
+            />
+            <input
+              type="time"
+              value={newBlock.end_time}
+              onChange={(event) =>
+                setNewBlock((prev) => ({ ...prev, end_time: event.target.value }))
+              }
+            />
+            <button type="submit" disabled={saving}>
+              Add Block
             </button>
           </form>
-          {messageSent ? (
-            <p className="success-note">Thanks. Updates will be sent to your inbox.</p>
-          ) : null}
+
+          <ul className="timeline-list">
+            {filteredPlanner.length === 0 ? (
+              <li className="empty">No schedule blocks yet. Add your first block above.</li>
+            ) : (
+              filteredPlanner.map((block) => (
+                <li key={block.id} className="timeline-item">
+                  <div className="timeline-time">
+                    <strong>{minutesToLabel(toMinutes(block.start_time))}</strong>
+                    <span>{minutesToLabel(toMinutes(block.end_time))}</span>
+                  </div>
+                  <div className="timeline-body">
+                    <p>{block.activity}</p>
+                  </div>
+                  <button
+                    type="button"
+                    className="ghost"
+                    onClick={() => removeBlock(block.id)}
+                    disabled={saving}
+                    aria-label="Delete schedule block"
+                  >
+                    Remove
+                  </button>
+                </li>
+              ))
+            )}
+          </ul>
+        </section>
+
+        <section className="card tasks-card">
+          <div className="section-head">
+            <h3>Priority Tasks</h3>
+            <span>{todayTasks.length} total</span>
+          </div>
+
+          <form className="inline-form task-form" onSubmit={createTask}>
+            <input
+              type="text"
+              placeholder="Add a priority task"
+              value={newTask}
+              onChange={(event) => setNewTask(event.target.value)}
+            />
+            <button type="submit" disabled={saving}>
+              Add Task
+            </button>
+          </form>
+
+          <ul className="task-list">
+            {todayTasks.length === 0 ? (
+              <li className="empty">No tasks yet. Add one priority to get started.</li>
+            ) : (
+              todayTasks.map((task) => (
+                <li key={task.id} className={task.completed ? "task-item done" : "task-item"}>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(task.completed)}
+                      onChange={() => toggleTask(task)}
+                    />
+                    <span>{task.task}</span>
+                  </label>
+                  <button
+                    type="button"
+                    className="ghost"
+                    onClick={() => removeTask(task.id)}
+                    disabled={saving}
+                    aria-label="Delete task"
+                  >
+                    Remove
+                  </button>
+                </li>
+              ))
+            )}
+          </ul>
+        </section>
+
+        <section className="card diary-card">
+          <div className="section-head">
+            <h3>Daily Reflection</h3>
+            <span>End-of-day note</span>
+          </div>
+
+          <form className="diary-form" onSubmit={saveDiary}>
+            <div className="mood-row">
+              <label htmlFor="mood">Mood</label>
+              <select id="mood" value={mood} onChange={(event) => setMood(event.target.value)}>
+                <option value="focused">Focused</option>
+                <option value="balanced">Balanced</option>
+                <option value="stressed">Stressed</option>
+                <option value="energized">Energized</option>
+              </select>
+            </div>
+            <textarea
+              value={entryText}
+              onChange={(event) => setEntryText(event.target.value)}
+              placeholder="What moved forward today? What should tomorrow start with?"
+              rows={5}
+            />
+            <button type="submit" disabled={saving}>
+              Save Reflection
+            </button>
+          </form>
         </section>
       </main>
-
-      <footer className="site-footer">
-        <p>© {year} DevOps Project. Built with React + Vite.</p>
-      </footer>
     </div>
   );
 }
