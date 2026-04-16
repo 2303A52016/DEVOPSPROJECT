@@ -4,8 +4,7 @@ const configuredApiBase = (import.meta.env.VITE_API_BASE || "").replace(/\/$/, "
 const isLocalHost =
   typeof window !== "undefined" &&
   (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
-const browserOrigin = typeof window !== "undefined" ? window.location.origin : "";
-const API_BASE = configuredApiBase || (isLocalHost ? "http://localhost:5000" : browserOrigin);
+const API_BASE = configuredApiBase || (isLocalHost ? "http://localhost:5000" : "https://devopsproject.onrender.com");
 const LOCAL_STORAGE_PREFIX = "life-planner-local";
 
 const todayIso = new Date().toISOString().slice(0, 10);

@@ -9,6 +9,7 @@ const diaryRoutes = require('./routes/diaryRoutes');
 const vitalityRoutes = require('./routes/vitalityRoutes');
 
 const app = express();
+let dbReady = false;
 
 app.use(cors());
 app.use(express.json());
@@ -23,18 +24,26 @@ app.get('/', (req, res) => {
   res.send('Life Planner Backend Running 🚀');
 });
 
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    db: dbReady ? 'connected' : 'fallback-local-store',
+  });
+});
+
 const PORT = 5000;
 
 async function startServer() {
   try {
     await initializeDatabase();
-    app.listen(PORT, () => {
-      console.log(`Life Planner API running on port ${PORT}`);
-    });
+    dbReady = true;
   } catch (error) {
-    console.error('Failed to initialize database:', error);
-    process.exit(1);
+    console.warn('Database initialization failed, running in fallback local-store mode:', error.message);
   }
+
+  app.listen(PORT, () => {
+    console.log(`Life Planner API running on port ${PORT}`);
+  });
 }
 
 startServer();

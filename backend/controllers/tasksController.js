@@ -1,4 +1,5 @@
 const pool = require('../config/db');
+const localStore = require('../config/localStore');
 
 // POST /api/tasks - Create a task
 const createTask = async (req, res) => {
@@ -21,10 +22,10 @@ const createTask = async (req, res) => {
       task: result.rows[0],
     });
   } catch (error) {
-    console.error('Create task error:', error);
-    res.status(500).json({
-      message: 'Error creating task',
-      error: error.message,
+    const createdTask = localStore.createTask({ user_id, task, completed });
+    res.status(201).json({
+      message: 'Task created successfully (fallback mode)',
+      task: createdTask,
     });
   }
 };
@@ -50,10 +51,9 @@ const getTasksByUserId = async (req, res) => {
       tasks: result.rows,
     });
   } catch (error) {
-    console.error('Get tasks error:', error);
-    res.status(500).json({
-      message: 'Error fetching tasks',
-      error: error.message,
+    res.json({
+      message: 'Tasks retrieved successfully (fallback mode)',
+      tasks: localStore.listTasksByUser(user_id),
     });
   }
 };
@@ -112,10 +112,18 @@ const updateTask = async (req, res) => {
       task: result.rows[0],
     });
   } catch (error) {
-    console.error('Update task error:', error);
-    res.status(500).json({
-      message: 'Error updating task',
-      error: error.message,
+    const updates = {};
+    if (task !== undefined) updates.task = task;
+    if (completed !== undefined) updates.completed = completed;
+
+    const updatedTask = localStore.updateTask(id, updates);
+    if (!updatedTask) {
+      return res.status(404).json({ message: 'Task not found' });
+    }
+
+    res.json({
+      message: 'Task updated successfully (fallback mode)',
+      task: updatedTask,
     });
   }
 };
@@ -149,10 +157,14 @@ const deleteTask = async (req, res) => {
       id: id,
     });
   } catch (error) {
-    console.error('Delete task error:', error);
-    res.status(500).json({
-      message: 'Error deleting task',
-      error: error.message,
+    const deleted = localStore.deleteTask(id);
+    if (!deleted) {
+      return res.status(404).json({ message: 'Task not found' });
+    }
+
+    res.json({
+      message: 'Task deleted successfully (fallback mode)',
+      id,
     });
   }
 };

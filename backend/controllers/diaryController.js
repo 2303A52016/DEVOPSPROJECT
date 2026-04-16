@@ -1,4 +1,5 @@
 const pool = require('../config/db');
+const localStore = require('../config/localStore');
 
 // POST /api/diary - Create diary entry
 const createDiaryEntry = async (req, res) => {
@@ -21,10 +22,11 @@ const createDiaryEntry = async (req, res) => {
       diary: result.rows[0],
     });
   } catch (error) {
-    console.error('Create diary entry error:', error);
-    res.status(500).json({
-      message: 'Error creating diary entry',
-      error: error.message,
+    const diary = localStore.createOrReplaceDiary({ user_id, date, mood, entry });
+
+    res.status(201).json({
+      message: 'Diary entry created successfully (fallback mode)',
+      diary,
     });
   }
 };
@@ -50,10 +52,9 @@ const getDiaryByUserId = async (req, res) => {
       diary: result.rows,
     });
   } catch (error) {
-    console.error('Get diary error:', error);
-    res.status(500).json({
-      message: 'Error fetching diary entries',
-      error: error.message,
+    res.json({
+      message: 'Diary entries retrieved successfully (fallback mode)',
+      diary: localStore.listDiaryByUser(user_id),
     });
   }
 };

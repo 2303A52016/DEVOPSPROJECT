@@ -1,4 +1,5 @@
 const pool = require('../config/db');
+const localStore = require('../config/localStore');
 
 // POST /api/vitality - Add health/vitality record
 const createVitalityRecord = async (req, res) => {
@@ -21,10 +22,10 @@ const createVitalityRecord = async (req, res) => {
       vitality: result.rows[0],
     });
   } catch (error) {
-    console.error('Create vitality record error:', error);
-    res.status(500).json({
-      message: 'Error creating vitality record',
-      error: error.message,
+    const vitality = localStore.createVitality({ user_id, date, calories_burned });
+    res.status(201).json({
+      message: 'Vitality record created successfully (fallback mode)',
+      vitality,
     });
   }
 };
@@ -50,10 +51,9 @@ const getVitalityByUserId = async (req, res) => {
       vitality: result.rows,
     });
   } catch (error) {
-    console.error('Get vitality error:', error);
-    res.status(500).json({
-      message: 'Error fetching vitality records',
-      error: error.message,
+    res.json({
+      message: 'Vitality records retrieved successfully (fallback mode)',
+      vitality: localStore.listVitalityByUser(user_id),
     });
   }
 };

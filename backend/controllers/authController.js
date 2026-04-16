@@ -1,5 +1,6 @@
 const bcrypt = require('bcrypt');
 const pool = require('../config/db');
+const localStore = require('../config/localStore');
 
 const signup = async (req, res) => {
   const { name, email, password } = req.body;
@@ -20,11 +21,19 @@ const signup = async (req, res) => {
       user: result.rows[0],
     });
   } catch (error) {
-    console.error('Signup error:', error);
-    res.status(500).json({
-      message: 'Error creating user',
-      error: error.message,
-    });
+    try {
+      const user = await localStore.signup({ name, email, password });
+      res.status(201).json({
+        message: 'User created successfully (fallback mode)',
+        user,
+      });
+    } catch (fallbackError) {
+      console.error('Signup error:', fallbackError);
+      res.status(500).json({
+        message: 'Error creating user',
+        error: fallbackError.message,
+      });
+    }
   }
 };
 
@@ -55,11 +64,24 @@ const login = async (req, res) => {
       user: userData,
     });
   } catch (error) {
-    console.error('Login error:', error);
-    res.status(500).json({
-      message: 'Error logging in',
-      error: error.message,
-    });
+    try {
+      const user = await localStore.login({ email, password });
+
+      if (!user) {
+        return res.status(401).json({ message: 'Invalid email or password' });
+      }
+
+      res.json({
+        message: 'Login successful (fallback mode)',
+        user,
+      });
+    } catch (fallbackError) {
+      console.error('Login error:', fallbackError);
+      res.status(500).json({
+        message: 'Error logging in',
+        error: fallbackError.message,
+      });
+    }
   }
 };
 

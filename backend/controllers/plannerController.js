@@ -1,4 +1,5 @@
 const pool = require('../config/db');
+const localStore = require('../config/localStore');
 
 // POST /api/planner - Add a planner activity
 const createPlanner = async (req, res) => {
@@ -22,10 +23,17 @@ const createPlanner = async (req, res) => {
       planner: result.rows[0],
     });
   } catch (error) {
-    console.error('Create planner error:', error);
-    res.status(500).json({
-      message: 'Error creating planner entry',
-      error: error.message,
+    const planner = localStore.createPlanner({
+      user_id,
+      activity,
+      start_time,
+      end_time,
+      date,
+    });
+
+    res.status(201).json({
+      message: 'Planner activity created successfully (fallback mode)',
+      planner,
     });
   }
 };
@@ -51,10 +59,9 @@ const getPlannerByUserId = async (req, res) => {
       planner: result.rows,
     });
   } catch (error) {
-    console.error('Get planner error:', error);
-    res.status(500).json({
-      message: 'Error fetching planner entries',
-      error: error.message,
+    res.json({
+      message: 'Planner entries retrieved successfully (fallback mode)',
+      planner: localStore.listPlannerByUser(user_id),
     });
   }
 };
@@ -125,10 +132,20 @@ const updatePlanner = async (req, res) => {
       planner: result.rows[0],
     });
   } catch (error) {
-    console.error('Update planner error:', error);
-    res.status(500).json({
-      message: 'Error updating planner entry',
-      error: error.message,
+    const updates = {};
+    if (activity !== undefined) updates.activity = activity;
+    if (start_time !== undefined) updates.start_time = start_time;
+    if (end_time !== undefined) updates.end_time = end_time;
+    if (date !== undefined) updates.date = date;
+
+    const planner = localStore.updatePlanner(id, updates);
+    if (!planner) {
+      return res.status(404).json({ message: 'Planner entry not found' });
+    }
+
+    res.json({
+      message: 'Planner activity updated successfully (fallback mode)',
+      planner,
     });
   }
 };
@@ -163,10 +180,14 @@ const deletePlanner = async (req, res) => {
       id: id,
     });
   } catch (error) {
-    console.error('Delete planner error:', error);
-    res.status(500).json({
-      message: 'Error deleting planner entry',
-      error: error.message,
+    const deleted = localStore.deletePlanner(id);
+    if (!deleted) {
+      return res.status(404).json({ message: 'Planner entry not found' });
+    }
+
+    res.json({
+      message: 'Planner activity deleted successfully (fallback mode)',
+      id,
     });
   }
 };
