@@ -452,9 +452,6 @@ function App() {
       </section>
 
       {error ? <p className="feedback error">{error}</p> : null}
-      {offlineMode ? (
-        <p className="feedback">Backend unavailable. Changes are being saved locally in this browser.</p>
-      ) : null}
       {loading ? <p className="feedback">Loading planner data...</p> : null}
 
       <main className="planner-layout">
