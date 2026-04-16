@@ -6,6 +6,7 @@ const isLocalHost =
   (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
 const browserOrigin = typeof window !== "undefined" ? window.location.origin : "";
 const API_BASE = configuredApiBase || (isLocalHost ? "http://localhost:5000" : browserOrigin);
+const LOCAL_STORAGE_PREFIX = "life-planner-local";
 
 const todayIso = new Date().toISOString().slice(0, 10);
 
@@ -46,6 +47,47 @@ function scoreDay(tasks, blocks) {
   return Math.round(taskScore + scheduleScore);
 }
 
+function localStorageKey(userId) {
+  return `${LOCAL_STORAGE_PREFIX}:${userId}`;
+}
+
+function readLocalState(userId) {
+  if (typeof window === "undefined") {
+    return { planner: [], tasks: [], diary: [] };
+  }
+
+  try {
+    const raw = window.localStorage.getItem(localStorageKey(userId));
+    if (!raw) {
+      return { planner: [], tasks: [], diary: [] };
+    }
+    const parsed = JSON.parse(raw);
+    return {
+      planner: Array.isArray(parsed.planner) ? parsed.planner : [],
+      tasks: Array.isArray(parsed.tasks) ? parsed.tasks : [],
+      diary: Array.isArray(parsed.diary) ? parsed.diary : [],
+    };
+  } catch {
+    return { planner: [], tasks: [], diary: [] };
+  }
+}
+
+function writeLocalState(userId, data) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(localStorageKey(userId), JSON.stringify(data));
+  } catch {
+    // Ignore storage write failures (private mode/storage quotas).
+  }
+}
+
+function createLocalId() {
+  return Number(`${Date.now()}${Math.floor(Math.random() * 1000)}`);
+}
+
 function App() {
   const [userId, setUserId] = useState("1");
   const [selectedDate, setSelectedDate] = useState(todayIso);
@@ -55,6 +97,7 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [offlineMode, setOfflineMode] = useState(false);
 
   const [newBlock, setNewBlock] = useState({
     activity: "",
@@ -96,6 +139,18 @@ function App() {
   }, [currentEntry]);
 
   useEffect(() => {
+    if (!userId.trim()) {
+      return;
+    }
+
+    writeLocalState(userId, {
+      planner: plannerItems,
+      tasks,
+      diary: diaryEntries,
+    });
+  }, [userId, plannerItems, tasks, diaryEntries]);
+
+  useEffect(() => {
     let active = true;
 
     async function loadPlannerData() {
@@ -121,16 +176,18 @@ function App() {
           return;
         }
 
+        setOfflineMode(false);
         setPlannerItems(plannerJson.planner || []);
         setTasks(tasksJson.tasks || []);
         setDiaryEntries(diaryJson.diary || []);
       } catch (err) {
         if (active) {
-          if (err instanceof TypeError) {
-            setError(`Cannot reach backend API at ${API_BASE || "(unknown)"}. Check backend availability and CORS.`);
-          } else {
-            setError(err.message || "Something went wrong while loading data.");
-          }
+          const local = readLocalState(userId);
+          setPlannerItems(local.planner);
+          setTasks(local.tasks);
+          setDiaryEntries(local.diary);
+          setOfflineMode(true);
+          setError("");
         }
       } finally {
         if (active) {
@@ -179,10 +236,21 @@ function App() {
       }
 
       const json = await res.json();
+      setOfflineMode(false);
       setPlannerItems((prev) => [json.planner, ...prev]);
       setNewBlock({ activity: "", start_time: "09:00", end_time: "10:00" });
-    } catch (err) {
-      setError(err.message || "Could not create planner block.");
+    } catch {
+      const localBlock = {
+        id: createLocalId(),
+        user_id: Number(userId),
+        activity: newBlock.activity.trim(),
+        start_time: newBlock.start_time,
+        end_time: newBlock.end_time,
+        date: selectedDate,
+      };
+      setOfflineMode(true);
+      setPlannerItems((prev) => [localBlock, ...prev]);
+      setNewBlock({ activity: "", start_time: "09:00", end_time: "10:00" });
     } finally {
       setSaving(false);
     }
@@ -196,9 +264,11 @@ function App() {
       if (!res.ok) {
         throw new Error("Could not delete planner block.");
       }
+      setOfflineMode(false);
       setPlannerItems((prev) => prev.filter((item) => item.id !== id));
-    } catch (err) {
-      setError(err.message || "Failed to remove planner block.");
+    } catch {
+      setOfflineMode(true);
+      setPlannerItems((prev) => prev.filter((item) => item.id !== id));
     } finally {
       setSaving(false);
     }
@@ -229,10 +299,19 @@ function App() {
       }
 
       const json = await res.json();
+      setOfflineMode(false);
       setTasks((prev) => [json.task, ...prev]);
       setNewTask("");
-    } catch (err) {
-      setError(err.message || "Failed to create task.");
+    } catch {
+      const localTask = {
+        id: createLocalId(),
+        user_id: Number(userId),
+        task: newTask.trim(),
+        completed: false,
+      };
+      setOfflineMode(true);
+      setTasks((prev) => [localTask, ...prev]);
+      setNewTask("");
     } finally {
       setSaving(false);
     }
@@ -240,7 +319,6 @@ function App() {
 
   async function toggleTask(task) {
     setError("");
-    const oldState = tasks;
     const nextState = tasks.map((item) =>
       item.id === task.id ? { ...item, completed: !item.completed } : item
     );
@@ -256,9 +334,10 @@ function App() {
       if (!res.ok) {
         throw new Error("Could not update task.");
       }
-    } catch (err) {
-      setTasks(oldState);
-      setError(err.message || "Failed to update task state.");
+      setOfflineMode(false);
+    } catch {
+      setOfflineMode(true);
+      setTasks(nextState);
     }
   }
 
@@ -270,9 +349,11 @@ function App() {
       if (!res.ok) {
         throw new Error("Could not delete task.");
       }
+      setOfflineMode(false);
       setTasks((prev) => prev.filter((item) => item.id !== id));
-    } catch (err) {
-      setError(err.message || "Failed to delete task.");
+    } catch {
+      setOfflineMode(true);
+      setTasks((prev) => prev.filter((item) => item.id !== id));
     } finally {
       setSaving(false);
     }
@@ -304,9 +385,18 @@ function App() {
       }
 
       const json = await res.json();
+      setOfflineMode(false);
       setDiaryEntries((prev) => [json.diary, ...prev.filter((item) => item.date !== selectedDate)]);
-    } catch (err) {
-      setError(err.message || "Failed to save reflection.");
+    } catch {
+      const localDiary = {
+        id: createLocalId(),
+        user_id: Number(userId),
+        date: selectedDate,
+        mood,
+        entry: entryText.trim(),
+      };
+      setOfflineMode(true);
+      setDiaryEntries((prev) => [localDiary, ...prev.filter((item) => item.date !== selectedDate)]);
     } finally {
       setSaving(false);
     }
@@ -363,6 +453,9 @@ function App() {
       </section>
 
       {error ? <p className="feedback error">{error}</p> : null}
+      {offlineMode ? (
+        <p className="feedback">Backend unavailable. Changes are being saved locally in this browser.</p>
+      ) : null}
       {loading ? <p className="feedback">Loading planner data...</p> : null}
 
       <main className="planner-layout">
