@@ -4,7 +4,8 @@ const configuredApiBase = (import.meta.env.VITE_API_BASE || "").replace(/\/$/, "
 const isLocalHost =
   typeof window !== "undefined" &&
   (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
-const API_BASE = configuredApiBase || (isLocalHost ? "http://localhost:5000" : "");
+const browserOrigin = typeof window !== "undefined" ? window.location.origin : "";
+const API_BASE = configuredApiBase || (isLocalHost ? "http://localhost:5000" : browserOrigin);
 
 const todayIso = new Date().toISOString().slice(0, 10);
 
@@ -101,12 +102,6 @@ function App() {
       setLoading(true);
       setError("");
 
-      if (!API_BASE) {
-        setLoading(false);
-        setError("Backend API is not configured. Set VITE_API_BASE to your deployed backend URL.");
-        return;
-      }
-
       try {
         const [plannerRes, tasksRes, diaryRes] = await Promise.all([
           fetch(`${API_BASE}/api/planner/${userId}`),
@@ -132,7 +127,7 @@ function App() {
       } catch (err) {
         if (active) {
           if (err instanceof TypeError) {
-            setError("Cannot reach backend API. Check VITE_API_BASE and backend CORS/network settings.");
+            setError(`Cannot reach backend API at ${API_BASE || "(unknown)"}. Check backend availability and CORS.`);
           } else {
             setError(err.message || "Something went wrong while loading data.");
           }
